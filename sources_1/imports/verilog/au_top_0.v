@@ -133,17 +133,13 @@ module au_top_0 (input         clk,
    assign rst = sync_rst;
 
    wire [7:0]  uart_wires;
-   wire        uart_data_rdy = 0;
+   wire        uart_data_rdy;
    
    uart uart(.tx(usb_tx),
              .rx(usb_rx),
              .clk(ui_clk),
-             .data_out(uart_wires));
-/* -----\/----- EXCLUDED -----\/-----
+             .data_out(uart_wires),
              .data_rdy(uart_data_rdy));
- -----/\----- EXCLUDED -----/\----- */
-
-   assign io_led2 = {5'b0, iostate};
 
    reg [31:0]   read_buf = 8'h55;
    
@@ -154,16 +150,18 @@ module au_top_0 (input         clk,
    localparam IO_WAIT_TO_WRITE = 3'b010;
    localparam IO_WRITTEN = 3'b011;
    localparam IO_READ_ADDR = 3'b100;
-   localparam IO_WAIT_FOR_RESULTS = 3'b101;
+   localparam IO_READ = 3'b101;
+   localparam IO_WAIT_FOR_RESULTS = 3'b110;
 
    localparam IO_ADDR_MAX = {18'b0, 8'hff};
    reg [2:0]  iostate = IO_CALIBRATING;
 
    reg [7:0]  wait_ctr = 8'h00;
    reg [7:0]  wrt_ctr = 8'h00;
+
    assign io_led1 = counter;
-   assign io_led2 = {5'b0, iostate};
-   assign io_led3 = wait_ctr;
+   assign io_led2 = {iostate, wea, en, read_arrived, cmd_rdy, write_rdy};
+   assign io_led3 = read_buf[7:0];
 
    always @(posedge ui_clk) begin
       case (iostate)
@@ -181,8 +179,7 @@ module au_top_0 (input         clk,
            else if (io_btn_w_cond)
              counter <= counter - 1'b1;
            else if (io_btn_c_cond) begin
-              wrt_ctr <= 8'h00;
-              iostate <= IO_WAIT_TO_WRITE;
+              iostate <= IO_READ_ADDR;
            end else if (io_btn_n_cond) begin
               if (addr == IO_ADDR_MAX)
                 addr <= 26'b0;
@@ -208,9 +205,9 @@ module au_top_0 (input         clk,
            end
         end
         IO_WRITTEN: begin
+           wea <= 0;
            wrt_ctr <= wrt_ctr + 1'b1;
            if (cmd_rdy) begin
-              wea <= 0;
               en <= 0;
               iostate <= IO_READ_ADDR;
            end
@@ -220,16 +217,18 @@ module au_top_0 (input         clk,
              cmd <= CMD_READ;
              en <= 1'b1;
              wait_ctr <= 8'h00;
-             iostate <= IO_WAIT_FOR_RESULTS;
+             iostate <= IO_READ;
           end
         end
-        IO_WAIT_FOR_RESULTS: begin
-           if (cmd_rdy & en) begin
-             en <= 1'b0;
-           end
-
+        IO_READ: begin
            wait_ctr <= wait_ctr + 1'b1;
-
+           if (cmd_rdy) begin
+              en <= 1'b0;
+              iostate <= IO_WAIT_FOR_RESULTS;
+           end
+        end
+        IO_WAIT_FOR_RESULTS: begin
+           wait_ctr <= wait_ctr + 1'b1;
            if (read_arrived) begin
               read_buf <= dout;
               iostate <= IO_READY_FOR_INPUT;

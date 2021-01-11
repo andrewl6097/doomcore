@@ -39,7 +39,7 @@ module uart(
    localparam STOP2 = 3'b101;
 
    reg             rdy = 1'b0;
-   assign data_rd = rdy;
+   assign data_rdy = rdy;
    reg [2:0]       state = WAITING;
    reg [3:0]       bits_recvd;
    reg             parity;

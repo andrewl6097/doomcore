@@ -42,6 +42,7 @@ module mig_wrapper_1 (input [127:0]  mem_in_app_wdf_data,
                       );
    
    wire                             M_mig_app_sr_active;
+   wire                             M_mig_app_rd_data_end;
    wire                             M_mig_app_ref_ack;
    wire                             M_mig_app_zq_ack;
    wire [11:0]                      M_mig_device_temp;
