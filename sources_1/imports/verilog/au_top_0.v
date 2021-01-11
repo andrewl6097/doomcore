@@ -133,13 +133,15 @@ module au_top_0 (input         clk,
    assign rst = sync_rst;
 
    wire [7:0]  uart_wires;
-   wire        uart_data_rdy;
+   wire        uart_data_rdy = 0;
    
    uart uart(.tx(usb_tx),
              .rx(usb_rx),
              .clk(ui_clk),
-             .data_out(uart_wires),
+             .data_out(uart_wires));
+/* -----\/----- EXCLUDED -----\/-----
              .data_rdy(uart_data_rdy));
+ -----/\----- EXCLUDED -----/\----- */
 
    assign io_led2 = {5'b0, iostate};
 
@@ -170,16 +172,11 @@ module au_top_0 (input         clk,
              iostate <= IO_READY_FOR_INPUT;
         end
         IO_READY_FOR_INPUT: begin
-/* -----\/----- EXCLUDED -----\/-----
            if (uart_data_rdy) begin
               counter <= uart_wires;
               wrt_ctr <= 8'h00;
               iostate <= IO_WAIT_TO_WRITE;
- -----/\----- EXCLUDED -----/\----- */
-/* -----\/----- EXCLUDED -----\/-----
-        end else if (io_btn_e_cond)
-           -----/\----- EXCLUDED -----/\----- */
-           if (io_btn_e_cond)
+           end else if (io_btn_e_cond)
              counter <= counter + 1'b1;
            else if (io_btn_w_cond)
              counter <= counter - 1'b1;
