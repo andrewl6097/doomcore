@@ -134,12 +134,20 @@ module au_top_0 (input         clk,
 
    wire [7:0]  uart_wires;
    wire        uart_data_rdy;
+
+   wire [7:0]  data_in;
+   reg         data_in_en = 1'b0;
+   wire        data_in_rdy;
    
    uart uart(.tx(usb_tx),
              .rx(usb_rx),
              .clk(ui_clk),
              .data_out(uart_wires),
-             .data_rdy(uart_data_rdy));
+             .data_rdy(uart_data_rdy),
+
+             .data_in(data_in),
+             .data_in_en(data_in_en),
+             .data_in_rdy(data_in_rdy));
 
    reg [31:0]   read_buf = 8'h55;
    
@@ -159,6 +167,9 @@ module au_top_0 (input         clk,
    reg [7:0]  wait_ctr = 8'h00;
    reg [7:0]  wrt_ctr = 8'h00;
 
+   reg [7:0]  out_buf;
+   assign data_in = out_buf;
+
    assign io_led1 = counter;
    assign io_led2 = {iostate, wea, en, read_arrived, cmd_rdy, write_rdy};
    assign io_led3 = read_buf[7:0];
@@ -172,6 +183,8 @@ module au_top_0 (input         clk,
         IO_READY_FOR_INPUT: begin
            if (uart_data_rdy) begin
               counter <= uart_wires;
+              out_buf <= uart_wires;
+              data_in_en <= 1'b1;
               wrt_ctr <= 8'h00;
               iostate <= IO_WAIT_TO_WRITE;
            end else if (io_btn_e_cond)
@@ -195,6 +208,7 @@ module au_top_0 (input         clk,
            end
         end
         IO_WAIT_TO_WRITE: begin
+           data_in_en <= 1'b0;
            wrt_ctr <= wrt_ctr + 1'b1;
            if (cmd_rdy & write_rdy) begin
               cmd <= CMD_WRITE;

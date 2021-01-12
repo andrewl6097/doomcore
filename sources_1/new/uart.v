@@ -23,14 +23,18 @@
 module uart(
             input            clk, // 81.25MHz
             input            rx,
-            output           tx,
+            output reg       tx,
             output reg [7:0] data_out,
-            output           data_rdy
+            output           data_rdy,
+
+            input [7:0]      data_in,
+            input            data_in_en,
+            output reg       data_in_rdy          
   );
 
    // 100MHz / 9600 => 10416 cycles per bit
-   reg [13:0]      counter;
-
+   reg [13:0]      r_counter;
+   reg [13:0]      w_counter;
    localparam WAITING = 3'b000;
    localparam WAITING_FOR_HALF = 3'b001;
    localparam WAITING_FOR_BIT = 3'b010;
@@ -40,68 +44,121 @@ module uart(
 
    reg             rdy = 1'b0;
    assign data_rdy = rdy;
-   reg [2:0]       state = WAITING;
+   reg [2:0]       r_state = WAITING;
+   reg [2:0]       w_state = WAITING;
+
    reg [3:0]       bits_recvd;
+   reg [3:0]       bits_written;
    reg             parity;
 
    reg [7:0]       tmp_buf;
+   reg [7:0]       wrt_buf;
 
    localparam FULL = 14'b10000100001111;
    localparam HALF = 14'b01000010000111;
 
+   // Writes
    always @(posedge clk) begin
-      case (state)
+      case (w_state)
+        WAITING: begin
+           if (data_in_en) begin
+              wrt_buf <= data_in;
+              w_state <= WAITING_FOR_BIT;
+              w_counter <= 14'b0;
+              data_in_rdy <= 1'b0;
+              bits_written <= 4'b0;
+              parity <= 1'b0;
+              tx <= 1'b0;
+           end
+        end
+        WAITING_FOR_BIT: begin
+           if (w_counter == FULL) begin
+              w_counter <= 14'b0;
+              if (bits_written == 4'b1000) begin
+                 tx <= 1'b1;
+                 w_state <= STOP1;
+              end else begin
+                 if (wrt_buf[0])
+                   parity <= parity + 1'b1;
+                 {tx, wrt_buf} <= {wrt_buf[0], 1'b0, wrt_buf[7:1]};
+                 bits_written <= bits_written + 1'b1;
+              end
+           end else
+             w_counter <= w_counter + 1'b1;
+        end
+        PARITY: begin
+           if (w_counter == FULL) begin
+              w_counter <= 14'b0;
+              tx <= 1'b1;
+              w_state <= STOP1;
+           end else
+             w_counter <= w_counter + 1'b1;
+        end
+        STOP1: begin
+           if (w_counter == FULL) begin
+              w_counter <= 14'b0;
+              tx <= 1'b1;
+              w_state <= WAITING;
+              data_in_rdy <= 1'b1;
+           end else
+             w_counter <= w_counter + 1'b1;
+        end
+      endcase
+   end
+
+   // Reads
+   always @(posedge clk) begin
+      case (r_state)
         WAITING: begin
            if (!rx) begin
-              counter <= 14'b0;
-              state <= WAITING_FOR_HALF;
+              r_counter <= 14'b0;
+              r_state <= WAITING_FOR_HALF;
            end
         end
         WAITING_FOR_HALF: begin
-           if (counter == HALF) begin // half cycle
-              counter <= 14'b0;
-              state <= WAITING_FOR_BIT;
+           if (r_counter == HALF) begin // half cycle
+              r_counter <= 14'b0;
+              r_state <= WAITING_FOR_BIT;
               bits_recvd <= 4'b0;
            end else
-             counter <= counter + 1'b1;
+             r_counter <= r_counter + 1'b1;
         end
         WAITING_FOR_BIT: begin
-           if (counter == FULL) begin
-              counter <= 14'b0;
+           if (r_counter == FULL) begin
+              r_counter <= 14'b0;
               if (bits_recvd == 4'b1000) begin
                  rdy <= 1'b1;
                  data_out <= tmp_buf;
-                 state <= PARITY;
+                 r_state <= PARITY;
               end else begin
                  tmp_buf <= {rx, tmp_buf[7:1]};
                  bits_recvd <= bits_recvd + 1'b1;
               end
            end else
-             counter <= counter + 1'b1;
+             r_counter <= r_counter + 1'b1;
         end
         PARITY: begin
            if (rdy == 1'b1)
              rdy <= 1'b0;
-           if (counter == FULL) begin
-              counter <= 14'b0;
-              parity <= rx;
-              state <= STOP1;
+           if (r_counter == FULL) begin
+              r_counter <= 14'b0;
+              r_state <= STOP1;
            end else
-             counter <= counter + 1'b1;
+             r_counter <= r_counter + 1'b1;
         end
         STOP1: begin
-           if (counter == FULL) begin
-              counter <= 14'b0;
-              state <= STOP2;
+           if (r_counter == FULL) begin
+              r_counter <= 14'b0;
+              r_state <= STOP2;
            end else
-             counter <= counter + 1'b1;
+             r_counter <= r_counter + 1'b1;
         end
         STOP2: begin
-           if (counter == FULL) begin
-              counter <= 14'b0;
-              state <= WAITING;
+           if (r_counter == FULL) begin
+              r_counter <= 14'b0;
+              r_state <= WAITING;
            end else
-             counter <= counter + 1'b1;
+             r_counter <= r_counter + 1'b1;
         end
       endcase
    end
