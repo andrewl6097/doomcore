@@ -38,7 +38,6 @@ module uart(
    localparam WAITING = 3'b000;
    localparam WAITING_FOR_HALF = 3'b001;
    localparam WAITING_FOR_BIT = 3'b010;
-   localparam PARITY = 3'b011;
    localparam STOP1 = 3'b100;
    localparam STOP2 = 3'b101;
 
@@ -49,7 +48,6 @@ module uart(
 
    reg [3:0]       bits_recvd;
    reg [3:0]       bits_written;
-   reg             parity;
 
    reg [7:0]       tmp_buf;
    reg [7:0]       wrt_buf;
@@ -67,9 +65,9 @@ module uart(
               w_counter <= 14'b0;
               data_in_rdy <= 1'b0;
               bits_written <= 4'b0;
-              parity <= 1'b0;
               tx <= 1'b0;
-           end
+           end else
+             tx <= 1'b1;
         end
         WAITING_FOR_BIT: begin
            if (w_counter == FULL) begin
@@ -78,19 +76,9 @@ module uart(
                  tx <= 1'b1;
                  w_state <= STOP1;
               end else begin
-                 if (wrt_buf[0])
-                   parity <= parity + 1'b1;
                  {tx, wrt_buf} <= {wrt_buf[0], 1'b0, wrt_buf[7:1]};
                  bits_written <= bits_written + 1'b1;
               end
-           end else
-             w_counter <= w_counter + 1'b1;
-        end
-        PARITY: begin
-           if (w_counter == FULL) begin
-              w_counter <= 14'b0;
-              tx <= 1'b1;
-              w_state <= STOP1;
            end else
              w_counter <= w_counter + 1'b1;
         end
@@ -129,7 +117,7 @@ module uart(
               if (bits_recvd == 4'b1000) begin
                  rdy <= 1'b1;
                  data_out <= tmp_buf;
-                 r_state <= PARITY;
+                 r_state <= STOP2;
               end else begin
                  tmp_buf <= {rx, tmp_buf[7:1]};
                  bits_recvd <= bits_recvd + 1'b1;
@@ -137,23 +125,9 @@ module uart(
            end else
              r_counter <= r_counter + 1'b1;
         end
-        PARITY: begin
+        STOP2: begin
            if (rdy == 1'b1)
              rdy <= 1'b0;
-           if (r_counter == FULL) begin
-              r_counter <= 14'b0;
-              r_state <= STOP1;
-           end else
-             r_counter <= r_counter + 1'b1;
-        end
-        STOP1: begin
-           if (r_counter == FULL) begin
-              r_counter <= 14'b0;
-              r_state <= STOP2;
-           end else
-             r_counter <= r_counter + 1'b1;
-        end
-        STOP2: begin
            if (r_counter == FULL) begin
               r_counter <= 14'b0;
               r_state <= WAITING;
