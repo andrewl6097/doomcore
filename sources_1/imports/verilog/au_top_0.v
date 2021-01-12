@@ -72,10 +72,10 @@ module au_top_0 (input         clk,
    wire [7:0]                hex_of_counter2;
    wire [7:0]                hex_of_counter3;
    wire [7:0]                hex_of_counter4;
-   sevseg_decode decode1(.in(addr[7:4]), .out(hex_of_counter1));
-   sevseg_decode decode2(.in(addr[3:0]), .out(hex_of_counter2));
-   sevseg_decode decode3(.in(counter[7:4]), .out(hex_of_counter3));
-   sevseg_decode decode4(.in(counter[3:0]), .out(hex_of_counter4));
+   sevseg_decode decode1(.in(addr[15:12]), .out(hex_of_counter1));
+   sevseg_decode decode2(.in(addr[11:8]), .out(hex_of_counter2));
+   sevseg_decode decode3(.in(addr[7:4]), .out(hex_of_counter3));
+   sevseg_decode decode4(.in(addr[3:0]), .out(hex_of_counter4));
 
    wire [31:0]               sevsegdata = {hex_of_counter1, hex_of_counter2, hex_of_counter3, hex_of_counter4};
    
@@ -84,7 +84,7 @@ module au_top_0 (input         clk,
    // Default values
    reg wea = 1'b0;
    reg en = 1'b0;
-   reg [25:0] addr = 26'h0;     // 2^26 distinct 32-bit blocks
+   reg [25:0] addr = 26'b0;     // 2^26 distinct 32-bit blocks
    reg [31:0] din = 32'h000000f0;
    localparam CMD_READ = 1'b1;
    localparam CMD_WRITE = 1'b0;
@@ -138,12 +138,23 @@ module au_top_0 (input         clk,
    wire [7:0]  data_in;
    reg         data_in_en = 1'b0;
    wire        data_in_rdy;
-   
+   reg         rdy_clr = 1'b0;
+
+   wire [13:0]  counter_leds;
+   wire [7:0]  debug_leds;
+
    uart uart(.tx(usb_tx),
              .rx(usb_rx),
              .clk(ui_clk),
+/* -----\/----- EXCLUDED -----\/-----
+             .clk(ui_clk),
+ -----/\----- EXCLUDED -----/\----- */
              .data_out(uart_wires),
              .data_rdy(uart_data_rdy),
+             .data_rdy_clr(rdy_clr),
+
+             .counter_leds(counter_leds),
+             .debug_leds(debug_leds),
 
              .data_in(data_in),
              .data_in_en(data_in_en),
@@ -151,103 +162,136 @@ module au_top_0 (input         clk,
 
    reg [31:0]   read_buf = 8'h55;
    
+   assign counter_leds = {io_led1[5:0], io_led2};
+   assign io_led1[7:6] = 2'b11;
+
    assign led[7:0] = read_buf[7:0];
    
-   localparam IO_CALIBRATING = 3'b000;
-   localparam IO_READY_FOR_INPUT = 3'b001;
-   localparam IO_WAIT_TO_WRITE = 3'b010;
-   localparam IO_WRITTEN = 3'b011;
-   localparam IO_READ_ADDR = 3'b100;
-   localparam IO_READ = 3'b101;
-   localparam IO_WAIT_FOR_RESULTS = 3'b110;
-
-   localparam IO_ADDR_MAX = {18'b0, 8'hff};
-   reg [2:0]  iostate = IO_CALIBRATING;
-
-   reg [7:0]  wait_ctr = 8'h00;
-   reg [7:0]  wrt_ctr = 8'h00;
+   localparam CALIBRATING = 4'h0;
+   localparam READY_FOR_LENGTH0 = 4'h1;
+   localparam READY_FOR_LENGTH1 = 4'h2;
+   localparam READY_FOR_LENGTH2 = 4'h3;
+   localparam READY_FOR_LENGTH3 = 4'h4;
+   localparam LENGTH_ACK = 4'h5;
+   localparam READY_FOR_BYTE = 4'h6;
+   localparam WAIT_TO_WRITE = 4'h7;
+   localparam WRITTEN = 4'h8;
+   localparam DATA_ACK = 4'h9;
+   localparam FLASHED = 4'hb;
+   
+   reg [3:0]  iostate = CALIBRATING;
 
    reg [7:0]  out_buf;
    assign data_in = out_buf;
 
-   assign io_led1 = counter;
-   assign io_led2 = {iostate, wea, en, read_arrived, cmd_rdy, write_rdy};
-   assign io_led3 = read_buf[7:0];
+   reg [1:0]  ack_counter = 2'b11;
+
+   // assign io_led1 = {calibrated, uart_data_rdy, rdy_clr, 5'b0};
+   //assign io_led2 = {4'b0, iostate};
+   assign io_led3 = debug_leds;
+
+   reg [31:0] data_length = 32'hffff;
+   reg [31:0] flash_buf;
 
    always @(posedge ui_clk) begin
-      case (iostate)
-        IO_CALIBRATING: begin
-           if (calibrated)
-             iostate <= IO_READY_FOR_INPUT;
-        end
-        IO_READY_FOR_INPUT: begin
-           if (uart_data_rdy) begin
-              counter <= uart_wires;
-              out_buf <= uart_wires;
-              data_in_en <= 1'b1;
-              wrt_ctr <= 8'h00;
-              iostate <= IO_WAIT_TO_WRITE;
-           end else if (io_btn_e_cond)
-             counter <= counter + 1'b1;
-           else if (io_btn_w_cond)
-             counter <= counter - 1'b1;
-           else if (io_btn_c_cond) begin
-              iostate <= IO_READ_ADDR;
-           end else if (io_btn_n_cond) begin
-              if (addr == IO_ADDR_MAX)
-                addr <= 26'b0;
-              else
-                addr <= addr + 1'b1;
-              iostate <= IO_READ_ADDR;
-           end else if (io_btn_s_cond) begin
-              if (addr == 26'b0)
-                addr <= IO_ADDR_MAX;
-              else
-                addr <= addr - 1'b1;
-              iostate <= IO_READ_ADDR;
-           end
-        end
-        IO_WAIT_TO_WRITE: begin
-           data_in_en <= 1'b0;
-           wrt_ctr <= wrt_ctr + 1'b1;
-           if (cmd_rdy & write_rdy) begin
-              cmd <= CMD_WRITE;
-              din <= {24'h0, counter};
-              wea <= 1'b1;
-              en <= 1'b1;
-              iostate <= IO_WRITTEN;
-           end
-        end
-        IO_WRITTEN: begin
-           wea <= 0;
-           wrt_ctr <= wrt_ctr + 1'b1;
-           if (cmd_rdy) begin
-              en <= 0;
-              iostate <= IO_READ_ADDR;
-           end
-        end
-        IO_READ_ADDR: begin
-          if (cmd_rdy) begin
-             cmd <= CMD_READ;
-             en <= 1'b1;
-             wait_ctr <= 8'h00;
-             iostate <= IO_READ;
+/* -----\/----- EXCLUDED -----\/-----
+      if (rst) begin
+         iostate <= CALIBRATING;
+         addr <= 26'b0;
+      end else begin
+        case (iostate)
+          CALIBRATING: begin
+             if (calibrated)
+               iostate <= READY_FOR_LENGTH0;
           end
-        end
-        IO_READ: begin
-           wait_ctr <= wait_ctr + 1'b1;
-           if (cmd_rdy) begin
-              en <= 1'b0;
-              iostate <= IO_WAIT_FOR_RESULTS;
-           end
-        end
-        IO_WAIT_FOR_RESULTS: begin
-           wait_ctr <= wait_ctr + 1'b1;
-           if (read_arrived) begin
-              read_buf <= dout;
-              iostate <= IO_READY_FOR_INPUT;
-           end
-        end           
-      endcase
+          READY_FOR_LENGTH0: begin
+             if (uart_data_rdy & !rdy_clr) begin
+                data_length[31:24] <= uart_wires;
+                iostate <= READY_FOR_LENGTH1;
+                rdy_clr <= 1'b1;
+             end
+          end
+          READY_FOR_LENGTH1: begin
+             if (uart_data_rdy & !rdy_clr) begin
+                data_length[23:16] <= uart_wires;
+                iostate <= READY_FOR_LENGTH2;
+                rdy_clr <= 1'b1;
+             end
+          end
+          READY_FOR_LENGTH2: begin
+             if (uart_data_rdy & !rdy_clr) begin
+                data_length[15:8] <= uart_wires;
+                iostate <= READY_FOR_LENGTH3;
+                rdy_clr <= 1'b1;
+             end
+          end
+          READY_FOR_LENGTH3: begin
+             if (uart_data_rdy & !rdy_clr) begin
+                data_length[7:0] <= uart_wires;
+                iostate <= LENGTH_ACK;
+                rdy_clr <= 1'b1;
+             end
+          end
+          LENGTH_ACK: begin
+             if (data_in_rdy) begin
+                out_buf <= 8'h2b;
+                data_in_en <= 1'b1;
+                iostate <= READY_FOR_BYTE;
+                ack_counter <= 2'b00;
+             end
+          end
+          READY_FOR_BYTE: begin
+             data_in_en <= 1'b0;
+             if (uart_data_rdy & !rdy_clr) begin
+                case (ack_counter)
+                  2'b00: flash_buf[31:24] <= uart_wires;
+                  2'b01: flash_buf[23:16] <= uart_wires;
+                  2'b10: flash_buf[15:8] <= uart_wires;
+                  2'b11: begin
+                     flash_buf[7:0] <= uart_wires;
+                     iostate <= WAIT_TO_WRITE;
+                  end
+                endcase
+                ack_counter <= ack_counter + 1'b1;
+                rdy_clr <= 1'b1;
+             end else begin
+                rdy_clr <= 1'b0;
+             end
+          end
+          WAIT_TO_WRITE: begin
+             if (cmd_rdy & write_rdy) begin
+                cmd <= CMD_WRITE;
+                din <= flash_buf;
+                wea <= 1'b1;
+                en <= 1'b1;
+                iostate <= WRITTEN;
+             end
+          end
+          WRITTEN: begin
+             wea <= 0;
+             if (cmd_rdy) begin
+                en <= 0;
+                iostate <= DATA_ACK;
+             end
+          end
+          DATA_ACK: begin
+             if (data_in_rdy) begin
+                out_buf <= 8'h2e;
+                data_in_en <= 1'b1;
+                if (data_length == 32'b0)
+                  iostate <= FLASHED;
+                else begin
+                   data_length <= data_length - 1'b1;
+                   addr <= addr + 3'b100;
+                   iostate <= READY_FOR_BYTE;
+                end
+             end
+          end
+          FLASHED: begin
+             data_in_en <= 1'b0;
+          end
+        endcase
+      end
+ -----/\----- EXCLUDED -----/\----- */
    end
 endmodule
