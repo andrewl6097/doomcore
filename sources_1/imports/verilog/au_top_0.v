@@ -138,7 +138,6 @@ module au_top_0 (input         clk,
    wire [7:0]  data_in;
    reg         data_in_en = 1'b0;
    wire        data_in_rdy;
-   reg         rdy_clr = 1'b0;
 
    wire [13:0]  counter_leds;
    wire [7:0]  debug_leds;
@@ -146,116 +145,105 @@ module au_top_0 (input         clk,
    uart uart(.tx(usb_tx),
              .rx(usb_rx),
              .clk(ui_clk),
-/* -----\/----- EXCLUDED -----\/-----
-             .clk(ui_clk),
- -----/\----- EXCLUDED -----/\----- */
              .data_out(uart_wires),
              .data_rdy(uart_data_rdy),
-             .data_rdy_clr(rdy_clr),
-
-             .counter_leds(counter_leds),
              .debug_leds(debug_leds),
-
              .data_in(data_in),
              .data_in_en(data_in_en),
              .data_in_rdy(data_in_rdy));
 
    reg [31:0]   read_buf = 8'h55;
    
-   assign counter_leds = {io_led1[5:0], io_led2};
-   assign io_led1[7:6] = 2'b11;
-
-   assign led[7:0] = read_buf[7:0];
-   
    localparam CALIBRATING = 4'h0;
-   localparam READY_FOR_LENGTH0 = 4'h1;
-   localparam READY_FOR_LENGTH1 = 4'h2;
-   localparam READY_FOR_LENGTH2 = 4'h3;
-   localparam READY_FOR_LENGTH3 = 4'h4;
-   localparam LENGTH_ACK = 4'h5;
-   localparam READY_FOR_BYTE = 4'h6;
-   localparam WAIT_TO_WRITE = 4'h7;
-   localparam WRITTEN = 4'h8;
-   localparam DATA_ACK = 4'h9;
-   localparam FLASHED = 4'hb;
+   localparam READY_FOR_LENGTH0 = 4'b0001;
+   localparam READY_FOR_LENGTH1 = 4'b0010;
+   localparam READY_FOR_LENGTH2 = 4'b0011;
+   localparam READY_FOR_LENGTH3 = 4'b0100;
+   localparam LENGTH_ACK = 4'b0101;
+   localparam READY_FOR_BYTE = 4'b0110;
+   localparam WAIT_TO_WRITE = 4'b0111;
+   localparam WRITTEN = 4'b1000;
+   localparam DATA_ACK = 4'b1001;
+   localparam FLASHED = 4'b1010;
    
-   reg [3:0]  iostate = CALIBRATING;
+   reg [3:0]  iostate_in = CALIBRATING;
+   reg [3:0]  iostate_out = CALIBRATING;
 
    reg [7:0]  out_buf;
    assign data_in = out_buf;
 
-   reg [1:0]  ack_counter = 2'b11;
+   reg [1:0]  ack_counter_in = 2'b11;
+   reg [1:0]  ack_counter_out = 2'b11;
 
-   // assign io_led1 = {calibrated, uart_data_rdy, rdy_clr, 5'b0};
-   //assign io_led2 = {4'b0, iostate};
-   assign io_led3 = debug_leds;
+   reg [31:0] data_length_out = 32'hffff;
+   reg [31:0] data_length_in = 32'hffff;
 
-   reg [31:0] data_length = 32'hffff;
+   assign io_led1 = data_length_out[7:0];
+   assign io_led2 = uart_wires;
+   assign io_led3 = {4'b1111, iostate_out};
+   assign led = {6'b0, ack_counter_out};
+
    reg [31:0] flash_buf;
 
    always @(posedge ui_clk) begin
-/* -----\/----- EXCLUDED -----\/-----
+      iostate_out <= iostate_in;
+      ack_counter_out <= ack_counter_in;
+      data_length_out <= data_length_in;
+      
       if (rst) begin
-         iostate <= CALIBRATING;
+         iostate_in <= CALIBRATING;
          addr <= 26'b0;
       end else begin
-        case (iostate)
+        case (iostate_out)
           CALIBRATING: begin
              if (calibrated)
-               iostate <= READY_FOR_LENGTH0;
+               iostate_in <= READY_FOR_LENGTH0;
           end
           READY_FOR_LENGTH0: begin
-             if (uart_data_rdy & !rdy_clr) begin
-                data_length[31:24] <= uart_wires;
-                iostate <= READY_FOR_LENGTH1;
-                rdy_clr <= 1'b1;
+             if (uart_data_rdy) begin
+                data_length_in[31:24] <= uart_wires;
+                iostate_in <= READY_FOR_LENGTH1;
              end
           end
           READY_FOR_LENGTH1: begin
-             if (uart_data_rdy & !rdy_clr) begin
-                data_length[23:16] <= uart_wires;
-                iostate <= READY_FOR_LENGTH2;
-                rdy_clr <= 1'b1;
+             if (uart_data_rdy) begin
+                data_length_in[23:16] <= uart_wires;
+                iostate_in <= READY_FOR_LENGTH2;
              end
           end
           READY_FOR_LENGTH2: begin
-             if (uart_data_rdy & !rdy_clr) begin
-                data_length[15:8] <= uart_wires;
-                iostate <= READY_FOR_LENGTH3;
-                rdy_clr <= 1'b1;
+             if (uart_data_rdy) begin
+                data_length_in[15:8] <= uart_wires;
+                iostate_in <= READY_FOR_LENGTH3;
              end
           end
           READY_FOR_LENGTH3: begin
-             if (uart_data_rdy & !rdy_clr) begin
-                data_length[7:0] <= uart_wires;
-                iostate <= LENGTH_ACK;
-                rdy_clr <= 1'b1;
+             if (uart_data_rdy) begin
+                data_length_in[7:0] <= uart_wires;
+                iostate_in <= LENGTH_ACK;
              end
           end
           LENGTH_ACK: begin
              if (data_in_rdy) begin
                 out_buf <= 8'h2b;
                 data_in_en <= 1'b1;
-                iostate <= READY_FOR_BYTE;
-                ack_counter <= 2'b00;
+                iostate_in <= READY_FOR_BYTE;
+                ack_counter_in <= 2'b00;
              end
           end
           READY_FOR_BYTE: begin
              data_in_en <= 1'b0;
-             if (uart_data_rdy & !rdy_clr) begin
-                case (ack_counter)
+             if (uart_data_rdy) begin
+                case (ack_counter_out)
                   2'b00: flash_buf[31:24] <= uart_wires;
                   2'b01: flash_buf[23:16] <= uart_wires;
                   2'b10: flash_buf[15:8] <= uart_wires;
                   2'b11: begin
                      flash_buf[7:0] <= uart_wires;
-                     iostate <= WAIT_TO_WRITE;
+                     iostate_in <= WAIT_TO_WRITE;
                   end
                 endcase
-                ack_counter <= ack_counter + 1'b1;
-                rdy_clr <= 1'b1;
-             end else begin
-                rdy_clr <= 1'b0;
+                ack_counter_in <= ack_counter_out + 1'b1;
              end
           end
           WAIT_TO_WRITE: begin
@@ -264,26 +252,27 @@ module au_top_0 (input         clk,
                 din <= flash_buf;
                 wea <= 1'b1;
                 en <= 1'b1;
-                iostate <= WRITTEN;
+                iostate_in <= WRITTEN;
              end
           end
           WRITTEN: begin
              wea <= 0;
              if (cmd_rdy) begin
                 en <= 0;
-                iostate <= DATA_ACK;
+                iostate_in <= DATA_ACK;
              end
           end
           DATA_ACK: begin
              if (data_in_rdy) begin
                 out_buf <= 8'h2e;
                 data_in_en <= 1'b1;
-                if (data_length == 32'b0)
-                  iostate <= FLASHED;
+                // If there was just one chunk remaining
+                if (data_length_out == 32'b1)
+                  iostate_in <= FLASHED;
                 else begin
-                   data_length <= data_length - 1'b1;
+                   data_length_in <= data_length_out - 1'b1;
                    addr <= addr + 3'b100;
-                   iostate <= READY_FOR_BYTE;
+                   iostate_in <= READY_FOR_BYTE;
                 end
              end
           end
@@ -292,6 +281,5 @@ module au_top_0 (input         clk,
           end
         endcase
       end
- -----/\----- EXCLUDED -----/\----- */
    end
 endmodule
